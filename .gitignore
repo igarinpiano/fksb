@@ -6,7 +6,8 @@ MWSTAGE/MWSDK/*
 
 !MWSTAGE/MWSDK/Act_samples
 
-3ddat/
+3ddat/*.stl
+3ddat/g-codes/
 
 !*.FCStd
 
