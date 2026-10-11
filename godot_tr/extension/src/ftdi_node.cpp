@@ -12,7 +12,17 @@ FtdiNode::FtdiNode(){
 
 }
 FtdiNode::~FtdiNode(){
+    close();
+}
 
+// 前のcontextを閉じて解放する (initを何回も呼ぶとdeviceが開きっぱなしになり2回目以降のopenが失敗するため)
+void FtdiNode::close(){
+    if(ftdic != nullptr){
+        ftdi_usb_close(ftdic);
+        ftdi_free(ftdic);
+        ftdic = nullptr;
+    }
+    status = 0;
 }
 
 
@@ -20,7 +30,11 @@ FtdiNode::~FtdiNode(){
 int FtdiNode::init(int INTERFACE, int VENDOR, int PRODUCT, int BAUDRATE){
     unsigned char c1,c2;
     unsigned short stat;
+    close();
     ftdic = ftdi_new();
+    if(ftdic == nullptr){
+        return -1;
+    }
     switch(INTERFACE){
         case 0:
             print(ftdi_set_interface(ftdic, INTERFACE_ANY));
@@ -38,7 +52,15 @@ int FtdiNode::init(int INTERFACE, int VENDOR, int PRODUCT, int BAUDRATE){
             print(ftdi_set_interface(ftdic, INTERFACE_D));
             break;
     }
-    print(ftdi_usb_open(ftdic, VENDOR, PRODUCT));
+    int ret = ftdi_usb_open(ftdic, VENDOR, PRODUCT);
+    print(ret);
+    if(ret < 0){
+        // 開けなかったときはisOK()が1を返さないようにしておく
+        ftdi_free(ftdic);
+        ftdic = nullptr;
+        status = ret;
+        return ret;
+    }
 
 
 
@@ -71,6 +93,9 @@ int FtdiNode::init(int INTERFACE, int VENDOR, int PRODUCT, int BAUDRATE){
     return 0;
 }
 int FtdiNode::write(int c){
+    if(ftdic == nullptr){
+        return -1;
+    }
     unsigned char uc[1] = {(unsigned char)c};
     int result = ftdi_write_data(ftdic, uc, 1);
     return result;
@@ -78,6 +103,9 @@ int FtdiNode::write(int c){
 
 PackedByteArray FtdiNode::read(int size){
     PackedByteArray byteArray;
+    if(ftdic == nullptr || size <= 0){
+        return byteArray;
+    }
     byteArray.resize(size);
     // write pointer of PackedByteArray
     int len = ftdi_read_data(ftdic, byteArray.ptrw(), size);

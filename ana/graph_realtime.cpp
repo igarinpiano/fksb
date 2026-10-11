@@ -14,6 +14,7 @@
 #define AXIS_LINE_WIDTH2 0.3
 #define AXIS_LINE_WIDTH3 0.5
 #define AXIS_COLOR 150
+#define CONTROL_HZ 30 // honban.cppのCONTROL_HZ (mode4の周期)
 #define INPUT_FILE_PATH "../record/tugounoiide-ta/launch_ground.csv"
 
 //index,flag1,flag2,orimp ( Big-Endian )
@@ -67,7 +68,7 @@ int main(){
     for(float i=0; i<=T_LIMIT; i+=10){
         float width;
         if((int)i%50 == 0){
-            if((int)1%100 == 0){
+            if((int)i%100 == 0){
                 width = AXIS_LINE_WIDTH3;
             }else{
                 width = AXIS_LINE_WIDTH2;
@@ -81,7 +82,7 @@ int main(){
     //for(float i=0; i<=X_LIMIT; i+=10){
     //    float width;
     //    if((int)i%50 == 0){
-    //        if((int)1%100 == 0){
+    //        if((int)i%100 == 0){
     //            width = AXIS_LINE_WIDTH3;
     //        }else{
     //            width = AXIS_LINE_WIDTH2;
@@ -154,7 +155,7 @@ int main(){
                 t += 30.0;
                 break;
             case 4:
-                t += 1000.0f/60.0f;
+                t += 1000.0f/CONTROL_HZ;
                 break;
         }
 

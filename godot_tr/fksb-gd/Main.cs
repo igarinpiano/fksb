@@ -300,6 +300,24 @@ public partial class Main : Control
     private bool isFlag(byte flag, int index){
         return (flag & (1<<index)) != 0;
     }
+    // $"{dat}"だと"System.Byte[]"という文字列が書かれてしまうので，byte列をそのまま追記する
+    private static void appendBytes(string path, byte[] dat){
+        using(FileStream fs = new FileStream(path, FileMode.Append, FileAccess.Write)){
+            fs.Write(dat, 0, dat.Length);
+        }
+    }
+    // ftdiのreadは届いている分しか返さないので，size byteそろうまで(数回まで)読みたす
+    private byte[] readFull(Node dev, int size){
+        List<byte> buf = new List<byte>();
+        for(int retry=0; buf.Count < size && retry < 20; retry++){
+            byte[] d = (byte[])dev.Call("read" , size - buf.Count);
+            if(d.Length == 0){
+                System.Threading.Thread.Sleep(1);
+            }
+            buf.AddRange(d);
+        }
+        return buf.ToArray();
+    }
     public async void Extract(){
         if((int)r3.Call("isOK") == 1){
             datIndex = 0;
@@ -315,7 +333,7 @@ public partial class Main : Control
             flashIndicator.SetText($"抽出中...");
             for(int adr = 0; adr*flashDatSize<flashMax; adr++){
                 r3.Call("write" , (int)'r');
-                byte[] dat = (byte[])r3.Call("read" , flashDatSize);
+                byte[] dat = readFull(r3, flashDatSize);
                 if(dat.Length == flashDatSize){
                     index = dat[0];
                     flag1 = dat[1];
@@ -333,7 +351,7 @@ public partial class Main : Control
                     avel.divide(900);
                     ori.setFromByte(dat.AsSpan(22));
                     File.AppendAllText($"{recordDir}flash/{pathDate}_decoded.csv" , $"{index},{Convert.ToString(flag1, 2).PadLeft(8, '0')},{Convert.ToString(flag2, 2).PadLeft(8, '0')},{ori.toString()},{avel.toString()},{acce.toString()},{mpv.toString()},{temp}\n");
-                    File.AppendAllText($"{recordDir}flash/{pathDate}_raw.bin" , $"{dat}");
+                    appendBytes($"{recordDir}flash/{pathDate}_raw.bin" , dat);
                     if(100 <=datIndex){
                         //100こえたら重いからリセット
                         flashRaw.SetText($"{BitConverter.ToString(dat)}");
@@ -416,10 +434,10 @@ public partial class Main : Control
 
 
 
-        File.WriteAllText($"{recordDir}realtime/{pathDate}_decoded.csv" , $"FksB data obtained with FksB support program @{now.ToString("yyyy/MM/dd HHmm ss")}");
-        File.AppendAllText($"{recordDir}realtime/{pathDate}_decoded.csv" , $"index,flag1,flag2,ori,mp ( Big-Endian )");
+        File.WriteAllText($"{recordDir}realtime/{pathDate}_decoded.csv" , $"FksB data obtained with FksB support program @{now.ToString("yyyy/MM/dd HHmm ss")}\n");
+        File.AppendAllText($"{recordDir}realtime/{pathDate}_decoded.csv" , $"time,index,flag1,flag2,ori,mp ( Big-Endian )\n");
 
-        File.WriteAllText($"{recordDir}realtime/{pathDate}_raw.bin" , $"FksB data obtained with FksB support program @{now.ToString("yyyy/MM/dd HHmm ss")}");
+        File.WriteAllText($"{recordDir}realtime/{pathDate}_raw.bin" , $"FksB data obtained with FksB support program @{now.ToString("yyyy/MM/dd HHmm ss")}\n");
     }
 
     // Called every frame. 'delta' is the elapsed time since the previous frame.
@@ -546,8 +564,6 @@ public partial class Main : Control
                     tl.SetText($"\nindex : {index}\nAcc : ( {acce.toString()} )\n");
                 }
                 if(dat.Length == normalDatSize){
-                    File.AppendAllText($"{recordDir}realtime/{pathDate}_decoded.csv" , $"{Time.GetUnixTimeFromSystem()},{index},{Convert.ToString(flag1, 2).PadLeft(8, '0')},{Convert.ToString(flag2, 2).PadLeft(8, '0')},{ori.toString()},{mpv.toString()}\n");
-                    File.AppendAllText($"{recordDir}realtime/{pathDate}_raw.bin" , $"{dat}");
                     ori.setFromByte(dat.AsSpan(3));
 
                     mp[0] = (short)((dat[11]<<8) | (dat[12]));
@@ -556,6 +572,9 @@ public partial class Main : Control
                     mpv.x = (float)mp[0];
                     mpv.y = (float)mp[1];
                     mpv.z = (float)mp[2];
+                    // 今回のpacketの値をdecodeしてから記録する (前は1つ前のpacketのori,mpが書かれていた)
+                    File.AppendAllText($"{recordDir}realtime/{pathDate}_decoded.csv" , $"{Time.GetUnixTimeFromSystem()},{index},{Convert.ToString(flag1, 2).PadLeft(8, '0')},{Convert.ToString(flag2, 2).PadLeft(8, '0')},{ori.toString()},{mpv.toString()}\n");
+                    appendBytes($"{recordDir}realtime/{pathDate}_raw.bin" , dat);
                     trans.Origin = new Vector3(0,0,0);
                     trans.Basis.X = (new Vec3(1,0,0)).rotate(ori).toGV();
                     trans.Basis.Y = (new Vec3(0,1,0)).rotate(ori).toGV();

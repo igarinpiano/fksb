@@ -13,13 +13,14 @@ class FtdiNode : public Node {
     GDCLASS(FtdiNode, Node);
 
     private:
-        struct ftdi_context *ftdic;
+        struct ftdi_context *ftdic = nullptr;
+        void close();
 
     protected:
         static void _bind_methods();
 
     public:
-        int status;
+        int status = 0;
         FtdiNode();
         ~FtdiNode();
 

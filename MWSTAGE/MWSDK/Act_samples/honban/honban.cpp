@@ -27,6 +27,7 @@
 #define REC_LID 0x01
 #define LID 0x00
 #define FLASH_MAX 0x07FFFF
+#define FLASH_PAGE 256 // page program 1回で書ける範囲
 #define DAT_LEN 30
 #define PKT_LEN 17
 #define ISMAIN false
@@ -76,6 +77,9 @@ constexpr float TOR_MAX = 12448130.0f;
 
 constexpr float MMF = -Wzz/CONTROL_DELAY;  // min maxを求めるときにつかう
 constexpr float WFAC = CONTROL_DELAY/Wzz * 1.0f; //角加速度出すときtorqueにかけざんする数
+// torqueを正にしたときのmpの増減の向き(モーターの取りつけ向き)
+constexpr float MDIR_X  = ISMAIN ? -1.0f :  1.0f;
+constexpr float MDIR_YZ = ISMAIN ?  1.0f : -1.0f;
 
 constexpr int16_t A_ZERO =   819; // 16384 * 0.05 5% 1000microsecondsに相当
 constexpr int16_t A_MIN  =   861; // モーターが実際に回転を始めるduty(1単位で実測)
@@ -97,6 +101,7 @@ void printByte(const byte buff[], const uint8_t len);
 void printByte(const byte buff);
 void printByteBin(const byte buff);
 void majiKeisandekiru3();
+void torqueRange(const float m, const float dir, float &lo, float &hi);
 class Vec;
 
 class I2C{
@@ -139,7 +144,7 @@ class I2C{
         //        return read(val, len);
         //    return false;
         //}
-        bool readByte(byte REG, byte val){
+        bool readByte(byte REG, byte &val){
             if(set(REG)){
                 if(auto&& rdr = Wire.get_reader(adr, 1)){
                     rdr >> val;
@@ -188,31 +193,48 @@ class Flash{
                     return false;
                 }
             }
+            // SPIが使えないときに呼び出し側のwhileで永久に止まらないようにする
+            return true;
+        }
+        // 残り容量が足りるか (FLASH_MAXをこえて書くとaddressが0に戻って先頭のデータを壊す)
+        bool hasRoom(uint32_t len){
+            return cAdr + len <= (uint32_t)FLASH_MAX + 1;
         }
         //WEL  !!  max 256 byte !!
-        void write(uint32_t adr, byte dat[], uint8_t len, bool doWrite){ 
+        // PPはpageの境界(256byte)をこえると同じpageの先頭に戻って書いてしまうので，境界で分割する
+        void write(uint32_t adr, byte dat[], uint8_t len, bool doWrite){
             if(doWrite){
-                while(!isWriteEnabled()){
-                    delay(1);
-                }
-                //WREN ( allow twelite to write)
-                if(auto&& trs = SPI.get_rwer()){
-                    trs << 0x06;
-                }
-                // wrenからすぐにprogramしないとダメ ここでstatus checkするな でもたぶんifは別々にすべき
-                //write(PP)
-                if(auto&& trs = SPI.get_rwer()){
-                    trs << 0x02;
-                    trs << (byte)(adr >> 16);
-                    trs << (byte)(adr >> 8) ;
-                    trs << (byte)adr       ;
-                    for(uint8_t i=0; i<len; i++){
-                        trs << dat[i];
-                    }
+                uint8_t done = 0;
+                while(done < len){
+                    uint32_t a = adr + done;
+                    uint16_t room = FLASH_PAGE - (uint16_t)(a % FLASH_PAGE);
+                    uint8_t n = (len - done < room) ? (len - done) : (uint8_t)room;
+                    writePage(a, &dat[done], n);
+                    done += n;
                 }
                 cAdr += len;
             }
             return;
+        }
+        void writePage(uint32_t adr, byte dat[], uint8_t len){
+            while(!isWriteEnabled()){
+                delay(1);
+            }
+            //WREN ( allow twelite to write)
+            if(auto&& trs = SPI.get_rwer()){
+                trs << 0x06;
+            }
+            // wrenからすぐにprogramしないとダメ ここでstatus checkするな でもたぶんifは別々にすべき
+            //write(PP)
+            if(auto&& trs = SPI.get_rwer()){
+                trs << 0x02;
+                trs << (byte)(adr >> 16);
+                trs << (byte)(adr >> 8) ;
+                trs << (byte)adr       ;
+                for(uint8_t i=0; i<len; i++){
+                    trs << dat[i];
+                }
+            }
         }
         void eraseAll(){
             //RDSR status check
@@ -395,7 +417,7 @@ class Vec{
             buffer[4] = (uint8_t)((z1 >> 0) & 0xFF);
             buffer[5] = (uint8_t)((z1 >> 8) & 0xFF);
         }
-        void setFromByte(const byte buffer[], const uint8_t k){ //0: gyro, 1:acc, 2:mag
+        void setFromByte(const byte buffer[], const uint8_t k){ //0: gyro, 1:mag, 2:acc
             float scale = 1.0;;
             switch(k){
                 case 0:
@@ -429,10 +451,10 @@ class Vec{
             else if(x<0) fac[0] = minv.x/x;
 
             if(0<y) fac[1] = maxv.y/y;
-            else if(x<0) fac[1] = minv.y/y;
+            else if(y<0) fac[1] = minv.y/y;
 
             if(0<z) fac[2] = maxv.z/z;
-            else if(x<0) fac[2] = minv.z/z;
+            else if(z<0) fac[2] = minv.z/z;
 
             float k = std::min({1.0F, fac[0], fac[1], fac[2]});
             if(!std::isfinite(k)){
@@ -451,10 +473,10 @@ class Vec{
             else if(x<0) fac[0] = minv/x;
 
             if(0<y) fac[1] = maxv/y;
-            else if(x<0) fac[1] = minv/y;
+            else if(y<0) fac[1] = minv/y;
 
             if(0<z) fac[2] = maxv/z;
-            else if(x<0) fac[2] = minv/z;
+            else if(z<0) fac[2] = minv/z;
 
             //float k = std::min(1.0F, std::min(fac[0], std::min(fac[1], fac[2])));
             float k = std::min({1.0F, fac[0], fac[1], fac[2]});
@@ -473,7 +495,7 @@ class Vec{
             return Vec(q2.x,q2.y,q2.z);
         }
         float abssum(){
-            return abs(x)+abs(y)+abs(z);
+            return std::fabs(x)+std::fabs(y)+std::fabs(z);
         }
 
 };
@@ -511,6 +533,7 @@ byte flag1;
 byte flag2;
 byte buff[8];
 int16_t mp[3];
+float mpf[3] = {0,0,0}; // mpの小数部まで持っておく(int16_tに直接足すと切り捨てで小さい変化が消える)
 byte dat[DAT_LEN];
 uint8_t mode = 1;
 uint8_t index = 0;
@@ -571,7 +594,7 @@ void setmode(const uint8_t modei,const bool is_force=false){ //モード切り�
         flag1 &= ~(1<<7);
         flag2 &= ~(1<<0);
         flag2 &= ~(1<<1);
-        if(is_force) flag1 |= (1<<3);
+        if(is_force) flag1 |= (1<<4); // force stopped
         printByteBin(flag1);
     }
     if(modei == 2){
@@ -597,7 +620,10 @@ void setmode(const uint8_t modei,const bool is_force=false){ //モード切り�
         mode = 4;
         flag1 |=  (1<<0);
         flag1 |=  (1<<1);
-        if(is_force) flag1 |= (1<<4);
+        if(is_force){
+            flag1 |=  (1<<3); // force started
+            flag1 &= ~(1<<4);
+        }
 
         Timer0.begin(CONTROL_HZ,true,false);
         Timer0.change_hz(CONTROL_HZ,0);
@@ -620,13 +646,21 @@ void get_data(){ //get and write data
     //}
     //Serial.println(buff[0], BIN);
 
+    // memory full
+    // 消去していない領域には上書きできない(先頭に戻って書くと既存のデータが壊れる)ので，いっぱいになったら書き込みをやめる
+    bool doWrite = f.hasRoom(DAT_LEN);
+    if(!doWrite && (flag1&(1<<6))){
+        flag1 &= ~(1<<6);
+        Serial << "------------------ memory full -----------------------" << crlf;
+    }
+
         // write inedex flags
     buff[0] = index;
-    f.write(f.cAdr, buff, 1, 1);
+    f.write(f.cAdr, buff, 1, doWrite);
     buff[0] = flag1;
-    f.write(f.cAdr, buff, 1, 1);
+    f.write(f.cAdr, buff, 1, doWrite);
     buff[0] = flag2;
-    f.write(f.cAdr, buff, 1, 1);
+    f.write(f.cAdr, buff, 1, doWrite);
 
 
         // acceralation
@@ -635,14 +669,14 @@ void get_data(){ //get and write data
     acce.setFromByte(buff,2);
     acce.x = -acce.x;
     acce.z = -acce.z;
-    acce.setToByte(buff,1);
-    f.write(f.cAdr, buff, 6, 1);
+    acce.setToByte(buff,2);
+    f.write(f.cAdr, buff, 6, doWrite);
 
         // write mps
     memcpy(&buff[0], &mp[0], 2);
     memcpy(&buff[2], &mp[1], 2);
     memcpy(&buff[4], &mp[2], 2);
-    f.write(f.cAdr, buff, 6, 1);
+    f.write(f.cAdr, buff, 6, doWrite);
 
     //    // magnetic IMU mode だと取得不可
     //bno.set(BNO_REG_M);
@@ -654,7 +688,7 @@ void get_data(){ //get and write data
     bno.set(BNO_REG_T);
     bno.read(buff, 1);
     temp = buff[0];
-    f.write(f.cAdr, buff, 1, 1);
+    f.write(f.cAdr, buff, 1, doWrite);
 
         // gyro
     bno.set(BNO_REG_G);
@@ -663,7 +697,7 @@ void get_data(){ //get and write data
     avel.x = -avel.x;
     avel.z = -avel.z;
     avel.setToByte(buff,0);
-    f.write(f.cAdr, buff, 6, 1);
+    f.write(f.cAdr, buff, 6, doWrite);
 
         // quaternion  データ送信にbuffを使うから移動しないでほしいじょ
     bno.set(BNO_REG_Q);
@@ -672,12 +706,13 @@ void get_data(){ //get and write data
     if(flag2&(1<<0)){
         tar = ori;
         flag2 &= ~(1<<0);
+        flag1 |=  (1<<7); // target ori ok
     }
     ori = tar.invert() * ori;
     ori.x = -ori.x;
     ori.z = -ori.z;
     ori.setToByte(buff);
-    f.write(f.cAdr, buff, 8, 1);
+    f.write(f.cAdr, buff, 8, doWrite);
 
 }
 void makePacket(byte dat[], uint8_t &index, byte q[8], int16_t mp[3], byte &flag1, byte &flag2){
@@ -784,14 +819,13 @@ void setup() {
 
     // bno setup ( https://cdn-shop.adafruit.com/datasheets/BST_BNO055_DS000_12.pdf)
     bno.setAdr(BNO_DEV);
+    // set units
+    // UNIT_SELはCONFIGMODE(リセット直後)でしか書きかえられないので，OPR_MODEを変える前に1回でまとめて書く
+    // bit0 acc:m/s^2  bit1 gyro:rad/s  bit4 temp:℃  bit7 Android(default)
+    bno.write(BNO_UNIT_SEL, (1<<7) | (0<<0) | (1<<1) | (0<<4));
+     delay(10);
     if(bno.write(BNO_OPR_MODE, 0x08)){
          delay(20);
-        // set units
-        bno.write(0x3B, (0<<0)); 
-         delay(10);
-        bno.write(0x3B, (1<<1)); 
-         delay(10);
-        bno.write(0x3B, (0<<4)); 
 
         Serial << "bno : ok" << mwx::crlf;
         flag1 |= (1<<5);
@@ -927,12 +961,6 @@ void loop() {
                 // is launched?
                 delay(100);
 
-                if(f.cAdr > FLASH_MAX){
-                    f.cAdr = 0x000000;
-                    flag1 &= ~(1<<6);
-                    Serial << "------------------ memory full -----------------------" << crlf;
-                }
-
                 get_data(); 
                 //launching judgment
                 if(LAUNCH_ACCE < acce.z ){
@@ -951,17 +979,12 @@ void loop() {
             case 3:
                  delay(30);
 
-                if(f.cAdr > FLASH_MAX){
-                    f.cAdr = 0x000000;
-                    flag1 &= ~(1<<6);
-                    Serial << "------------------ memory full -----------------------" << crlf;
-                }
-
                 get_data(); 
 
                 // M_NOR まで上げる
                 for(uint8_t i=0; i<3; i++){
-                    mp[i] += (M_NOR-(float)mp[i]) *M_RES;
+                    mpf[i] += (M_NOR-mpf[i]) *M_RES;
+                    mp[i] = (int16_t)(mpf[i] + 0.5f);
                 }
                 for(uint8_t i=0; i<3; i++){
                     if(M_MIN <= mp[i] && mp[i] <= M_MAX){
@@ -977,7 +1000,7 @@ void loop() {
                     flag1 |= (1<<2);
                 }
 
-                if(flag1&(1<<2) && !(flag2&(1<<1)) && EXPAND_ACCE < abs(acce.z)){
+                if(flag1&(1<<2) && !(flag2&(1<<1)) && EXPAND_ACCE < std::fabs(acce.z)){
                     if(millis() - tick >= 500){
                         tick = millis();
                         flag2 |= (1<<1);
@@ -1033,6 +1056,19 @@ void loop() {
     }
 }
 
+// mpがm のとき，mpを0 ~ M_MAXの範囲におさめたまま加えられるtorqueの範囲[lo, hi]
+// dir : torqueを正にしたときにmpが増えるなら1，減るなら-1
+void torqueRange(const float m, const float dir, float &lo, float &hi){
+    float down = m * MMF;           // mpを0まで下げるtorque(dir=1のとき負)
+    float up   = (m - M_MAX) * MMF; // mpをM_MAXまで上げるtorque(dir=1のとき正)
+    if(0 < dir){
+        lo = down;
+        hi = up;
+    }else{
+        lo = -up;
+        hi = -down;
+    }
+}
 void majiKeisandekiru3(){
 
     //loopの中でinstantiateしてもほぼ時間食わないらしいから安心しで作ってくれ
@@ -1042,22 +1078,22 @@ void majiKeisandekiru3(){
     Vec avel_ap = avel * LPF_FAC + prev * LPF_FAC2;
     //Vec avel_ap = avel;
 
-    if(abs(oriv.x) < MUSHI){ 
+    if(std::fabs(oriv.x) < MUSHI){ 
         oriv.x = 0;
     }
-    if(abs(oriv.y) < MUSHI){ 
+    if(std::fabs(oriv.y) < MUSHI){ 
         oriv.y = 0;
     }
-    if(abs(oriv.z) < MUSHI){ 
+    if(std::fabs(oriv.z) < MUSHI){ 
         oriv.z = 0;
     }
-    if(abs(avel_ap.x) < MUSHI_AVEL){ 
+    if(std::fabs(avel_ap.x) < MUSHI_AVEL){ 
         avel_ap.x = 0;
     }
-    if(abs(avel_ap.y) < MUSHI_AVEL){ 
+    if(std::fabs(avel_ap.y) < MUSHI_AVEL){ 
         avel_ap.y = 0;
     }
-    if(abs(avel_ap.z) < MUSHI_AVEL){ 
+    if(std::fabs(avel_ap.z) < MUSHI_AVEL){ 
         avel_ap.z = 0;
     }
     error_i += oriv;
@@ -1099,36 +1135,29 @@ void majiKeisandekiru3(){
     torque.print();
 
 
+    // torqueの向きとmpの増減の向きは軸ごとに違う(MDIR)ので，それに合わせて上限下限を決める
     Vec min; 
-    min.x = (float)mp[0] * MMF;
-    min.y = (float)mp[1] * MMF;
-    min.z = (float)mp[2] * MMF;
     Vec max; 
-    max.x = ((float)mp[0]-M_MAX) * MMF;
-    max.y = ((float)mp[1]-M_MAX) * MMF;
-    max.z = ((float)mp[2]-M_MAX) * MMF;
+    torqueRange(mpf[0], MDIR_X,  min.x, max.x);
+    torqueRange(mpf[1], MDIR_YZ, min.y, max.y);
+    torqueRange(mpf[2], MDIR_YZ, min.z, max.z);
 
     torque.clip(min,max);
     torque.clip(-TOR_MAX, TOR_MAX);
 
 
-    if(ISMAIN){
-        mp[0] += -torque.x*WFAC + (M_NOR-(float)mp[0]) *M_RES;
-        mp[1] +=  torque.y*WFAC + (M_NOR-(float)mp[1]) *M_RES;
-        mp[2] +=  torque.z*WFAC + (M_NOR-(float)mp[2]) *M_RES;
-    }else{
-        mp[0] +=  torque.x*WFAC + (M_NOR-(float)mp[0]) *M_RES;
-        mp[1] += -torque.y*WFAC + (M_NOR-(float)mp[1]) *M_RES;
-        mp[2] += -torque.z*WFAC + (M_NOR-(float)mp[2]) *M_RES;
-    }
+    mpf[0] += MDIR_X  * torque.x*WFAC + (M_NOR-mpf[0]) *M_RES;
+    mpf[1] += MDIR_YZ * torque.y*WFAC + (M_NOR-mpf[1]) *M_RES;
+    mpf[2] += MDIR_YZ * torque.z*WFAC + (M_NOR-mpf[2]) *M_RES;
 
     for(uint8_t i=0; i<3; i++){
-        if(mp[i] <= 1){
-            mp[i] = 1;
+        if(mpf[i] <= 1){
+            mpf[i] = 1;
         }
-        if(mp[i] >= M_MAX){
-            mp[i] = M_MAX;
+        if(mpf[i] >= M_MAX){
+            mpf[i] = M_MAX;
         }
+        mp[i] = (int16_t)(mpf[i] + 0.5f);
     }
     prev = avel;
 }
@@ -1148,6 +1177,10 @@ void on_rx_packet(packet_rx& rx, bool_t &handled) {
     //            , com       // 4bytes of msg
     //);
     auto dat = rx.get_payload();
+    if(dat.size() == 0){
+        handled = true;
+        return;
+    }
     char com = dat[0];
 
     Serial << com << mwx::crlf;
@@ -1350,7 +1383,7 @@ number        name        mode bit    clock   packet  doWrite?  doControl? descr
 1      : スリープモード   0b00         1fps   1pps    false     false      動作の正常性を確認するためのmode
 2      : フライトモード   0b01        10fps   1pps    true      false      打ち上げ待機モード 地上局からやる この状態でZ軸向き加速度を検知するとmode4に移行
 3      : 飛行中           0b10        1000/30fps   3pps    true      false      飛行中のフラグ
-4      : 制御中           0b11        60fps   6pps    true      true       制御中
+4      : 制御中           0b11        30fps   3pps    true      true       制御中 (CONTROL_HZ)
 
 */
 /* other memo
