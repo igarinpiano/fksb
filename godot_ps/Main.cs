@@ -162,7 +162,7 @@ public partial class Main : G.Control {
         //ori[0] = new Quat(new Vec3(0.0f,1.0f,0) , 4.0F);
         //ori[1] = new Quat(new Vec3(0.0f,1.0f,0) , 4.0F);
         // vectorized ori
-        oriv[1] = new Vec3();
+        oriv[0] = new Vec3();
         oriv[1] = new Vec3();
 
         
@@ -531,8 +531,8 @@ public partial class Main : G.Control {
         integral.add(error);
 
         GD.Print($"avel : {avel.toString()}");
-        deltaV = Vec3.multiply(avel , Kp);
-        deltaV.add(Vec3.multiply( error , Kd ));
+        deltaV = Vec3.multiply(avel , Kd);
+        deltaV.add(Vec3.multiply( error , Kp ));
         deltaV.add(Vec3.multiply( integral , Ki ));
 
 
@@ -609,7 +609,7 @@ public partial class Main : G.Control {
         if(wav.x >= maxwav){
             wav.x = maxwav;
         }
-        if(wav.z >= maxwav){
+        if(wav.y >= maxwav){
             wav.y = maxwav;
         }
         if(wav.z >= maxwav){

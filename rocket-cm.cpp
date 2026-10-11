@@ -30,7 +30,7 @@ int main(){
     for(float i=LLIMIT; i<=HLIMIT; i+=10){
         float width;
         if((int)i%50 == 0){
-            if((int)1%100 == 0){
+            if((int)i%100 == 0){
                 width = AXIS_LINE_WIDTH3;
             }else{
                 width = AXIS_LINE_WIDTH2;
@@ -44,7 +44,7 @@ int main(){
     for(float i=0; i<=HEIGHT; i+=10){
         float width;
         if((int)i%50 == 0){
-            if((int)1%100 == 0){
+            if((int)i%100 == 0){
                 width = AXIS_LINE_WIDTH3;
             }else{
                 width = AXIS_LINE_WIDTH2;

@@ -17,6 +17,7 @@
 #define AXIS_COLOR 100
 #define M_MAX 300
 #define PI 3.1415
+#define CONTROL_HZ 30 // honban.cppのCONTROL_HZ (mode4の周期)
 //#define INPUT_FILE_PATH "../record/tugounoiide-ta/free_fall.csv"
 //#define INPUT_FILE_PATH "../record/tugounoiide-ta/launch.csv"
 #define INPUT_FILE_PATH "../record/tugounoiide-ta/drop1.csv"
@@ -132,10 +133,10 @@ class Vec{
             else if(x<0) fac[0] = minv.x/x;
 
             if(0<y) fac[1] = maxv.y/y;
-            else if(x<0) fac[1] = minv.y/y;
+            else if(y<0) fac[1] = minv.y/y;
 
             if(0<z) fac[2] = maxv.z/z;
-            else if(x<0) fac[2] = minv.z/z;
+            else if(z<0) fac[2] = minv.z/z;
 
             float k = std::min({1.0F, fac[0], fac[1], fac[2]});
             if(!std::isfinite(k)){
@@ -154,10 +155,10 @@ class Vec{
             else if(x<0) fac[0] = minv/x;
 
             if(0<y) fac[1] = maxv/y;
-            else if(x<0) fac[1] = minv/y;
+            else if(y<0) fac[1] = minv/y;
 
             if(0<z) fac[2] = maxv/z;
-            else if(x<0) fac[2] = minv/z;
+            else if(z<0) fac[2] = minv/z;
 
             //float k = std::min(1.0F, std::min(fac[0], std::min(fac[1], fac[2])));
             float k = std::min({1.0F, fac[0], fac[1], fac[2]});
@@ -332,8 +333,7 @@ int main(){
 
     // substitue data to vector
     fstream csv(INPUT_FILE_PATH, ios::in);
-    //dump
-    getline(csv, tmp);
+    //dump  (flashのcsvのheaderは1行)
     getline(csv, tmp);
     while(getline(csv, tmp)){
         string dat_string[8];
@@ -406,7 +406,7 @@ int main(){
                 t += 30.0;
                 break;
             case 4:
-                t += 1000.0f/60.0f;
+                t += 1000.0f/CONTROL_HZ;
                 break;
         }
 

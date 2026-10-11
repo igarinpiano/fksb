@@ -126,10 +126,10 @@ public partial class Main{
             else if(x<0) fac[0] = min.x/x;
 
             if(0<y) fac[1] = max.y/y;
-            else if(x<0) fac[1] = min.y/y;
+            else if(y<0) fac[1] = min.y/y;
 
             if(0<z) fac[2] = max.z/z;
-            else if(x<0) fac[2] = min.z/z;
+            else if(z<0) fac[2] = min.z/z;
 
             float k = MathF.Min(1.0F, MathF.Min(fac[0], MathF.Min(fac[1], fac[2])));
 
@@ -142,10 +142,10 @@ public partial class Main{
             else if(x<0) fac[0] = min/x;
 
             if(0<y) fac[1] = max/y;
-            else if(x<0) fac[1] = min/y;
+            else if(y<0) fac[1] = min/y;
 
             if(0<z) fac[2] = max/z;
-            else if(x<0) fac[2] = min/z;
+            else if(z<0) fac[2] = min/z;
 
             float k = MathF.Min(1.0F, MathF.Min(fac[0], MathF.Min(fac[1], fac[2])));
 
